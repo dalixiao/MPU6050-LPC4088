@@ -1,3 +1,4 @@
+#define NDEBUG  //disable assert
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
@@ -18,6 +19,10 @@
 #define SPEED_100KHZ         100000
 #define SPEED_400KHZ         400000
 
+#define GPIO_LED_PIN     10				// GPIO pin number mapped to LED toggle
+#define GPIO_LED_PORT    GPIOINT_PORT2	// GPIO port number mapped to LED toggle
+#define GPIO_IRQ_HANDLER  			GPIO_IRQHandler/* GPIO interrupt IRQ function name */
+#define GPIO_INTERRUPT_NVIC_NAME    GPIO_IRQn	/* GPIO interrupt NVIC interrupt name */
 
 
 static int mode_poll;   /* Poll/Interrupt mode flag */
@@ -87,8 +92,29 @@ static void i2c_read_setup(I2C_XFER_T *xfer, uint8_t addr, int numBytes)
 	xfer->rxBuff = i2Cbuffer[1];
 
 }
+void GPIO_IRQ_HANDLER(void)
+{
+	Board_LED_Toggle(0);  // Toggle LED0
+	Chip_GPIOINT_ClearIntStatus(LPC_GPIOINT, GPIO_LED_PORT, 1 << GPIO_LED_PIN);  // Clear interrupt flag in NVIC
 
+}
 
+void Configure_Interrupt(){
+	// Turn on LED0
+	Board_LED_Set(0, false);
+
+	// Initialize GPIO button pin as input
+	Chip_IOCON_PinMux(LPC_GPIO, GPIO_LED_PORT, GPIO_LED_PIN, IOCON_FUNC0, IOCON_MODE_PULLUP);	// Configures pin as GPIO w/ pullup resistor
+	Chip_GPIO_SetPinDIRInput(LPC_GPIO, GPIO_LED_PORT, GPIO_LED_PIN);  // Configures pin as an input
+
+	// Configure the GPIO interrupt
+	Chip_GPIOINT_SetIntFalling(LPC_GPIOINT, GPIO_LED_PORT, 1 << GPIO_LED_PIN);  // Configure GPIO to trigger an interrupt when input falls from high to low
+
+	// Enable interrupt in the NVIC
+	NVIC_ClearPendingIRQ(GPIO_INTERRUPT_NVIC_NAME);  // Clear pending interrupt flag
+	NVIC_EnableIRQ(GPIO_INTERRUPT_NVIC_NAME);  // Enable interrupt handling in NVIC
+
+}
 /*****************************************************************************
  * Public functions
  ****************************************************************************/
@@ -250,7 +276,7 @@ int main(void)
 	i2cDev = I2C0;
 
 	//i2c_read_setup(&temp_xfer, (I2C_SLAVE_TEMP_ADDR<<1), 14);
-
+	Configure_Interrupt();
     MPU6050_Init();
     /*MPU6050_Read(0x6B);
     MPU6050_Read(0x1B);
@@ -264,6 +290,7 @@ int main(void)
 	float ratio = 0.00119751;
 
     while(1){
+    	__WFI();
     	if(flag == 1){
         	MPU6050_GetMotionData();
         	printf("ax is %.*f \r\n", 5, Ax*ratio);
@@ -278,7 +305,6 @@ int main(void)
         	printf("end of reading \r\n");
         	flag = 0;
     	}
-    	__WFI();
     }
 
 	Chip_I2C_DeInit(I2C0);
